@@ -1,10 +1,10 @@
 from uuid import uuid4
 from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_core.documents import Document
 
 
-embeddings = OllamaEmbeddings(model="all-minilm")
+embeddings = FastEmbedEmbeddings()
 vector_store = Chroma(
     collection_name="testing",
     embedding_function=embeddings,
