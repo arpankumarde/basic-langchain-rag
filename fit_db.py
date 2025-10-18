@@ -1,19 +1,29 @@
-import chromadb
+from uuid import uuid4
+from langchain_chroma import Chroma
+from langchain_ollama import OllamaEmbeddings
+from langchain_core.documents import Document
 
-chroma_client = chromadb.PersistentClient(path="./db")
-collection = chroma_client.get_or_create_collection(name="testing")
 
-collection.upsert(
-    documents=[
-        "This is a document about pineapple",
-        "This is a document about oranges",
-    ],
-    ids=["id1", "id2"],
+embeddings = OllamaEmbeddings(model="all-minilm")
+vector_store = Chroma(
+    collection_name="testing",
+    embedding_function=embeddings,
+    persist_directory="./db",
 )
 
-results = collection.query(
-    query_texts=["apple"],
-    n_results=2,
+document_1 = Document(
+    page_content="I had chocolate chip pancakes and scrambled eggs for breakfast this morning.",
+    metadata={"source": "tweet"},
+    id=1,
 )
 
-print(results.get("documents"))
+document_2 = Document(
+    page_content="The weather forecast for tomorrow is cloudy and overcast, with a high of 62 degrees.",
+    metadata={"source": "news"},
+    id=2,
+)
+
+documents = [document_1, document_2]
+doc_ids = [str(uuid4()) for _ in range(len(documents))]
+
+vector_store.add_documents(documents=documents, ids=doc_ids)
