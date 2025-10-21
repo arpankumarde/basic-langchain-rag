@@ -1,92 +1,110 @@
+import os
+from datetime import datetime
 from uuid import uuid4
 from langchain_chroma import Chroma
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
 
 
 embeddings = FastEmbedEmbeddings()
 vector_store = Chroma(
-    collection_name="testing",
+    collection_name="test",
     embedding_function=embeddings,
     persist_directory="./db",
 )
 
-document_1 = Document(
-    page_content="I had chocolate chip pancakes and scrambled eggs for breakfast this morning.",
-    metadata={"source": "tweet"},
-    id=1,
-)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 
-document_2 = Document(
-    page_content="The weather forecast for tomorrow is cloudy and overcast, with a high of 62 degrees.",
-    metadata={"source": "news"},
-    id=2,
-)
 
-document_3 = Document(
-    page_content="Building an exciting new project with LangChain - come check it out!",
-    metadata={"source": "tweet"},
-    id=3,
-)
+def get_pdf_files(directory: str):
+    """Get all PDF files from the specified directory."""
+    pdf_files: list[str] = []
+    if os.path.exists(directory):
+        for filename in os.listdir(directory):
+            if filename.lower().endswith(".pdf"):
+                pdf_files.append(os.path.join(directory, filename))
+    return pdf_files
 
-document_4 = Document(
-    page_content="Robbers broke into the city bank and stole $1 million in cash.",
-    metadata={"source": "news"},
-    id=4,
-)
 
-document_5 = Document(
-    page_content="Wow! That was an amazing movie. I can't wait to see it again.",
-    metadata={"source": "tweet"},
-    id=5,
-)
+def extract_text_from_pdf(pdf_path: str):
+    """Extract text content from a PDF file."""
+    text = ""
+    try:
+        reader = PdfReader(pdf_path)
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    except Exception as e:
+        print(f"Error reading {pdf_path}: {e}")
+    return text
 
-document_6 = Document(
-    page_content="Is the new iPhone worth the price? Read this review to find out.",
-    metadata={"source": "website"},
-    id=6,
-)
 
-document_7 = Document(
-    page_content="The top 10 soccer players in the world right now.",
-    metadata={"source": "website"},
-    id=7,
-)
+# Get all PDF files from the data directory
+data_directory = "./data"
+pdf_files = get_pdf_files(data_directory)
 
-document_8 = Document(
-    page_content="LangGraph is the best framework for building stateful, agentic applications!",
-    metadata={"source": "tweet"},
-    id=8,
-)
+documents: list[Document] = []
+current_timestamp = datetime.now().isoformat()
 
-document_9 = Document(
-    page_content="The stock market is down 500 points today due to fears of a recession.",
-    metadata={"source": "news"},
-    id=9,
-)
+# Process each PDF file
+for pdf_path in pdf_files:
+    filename = os.path.basename(pdf_path)
+    print(f"Processing: {filename}")
 
-document_10 = Document(
-    page_content="I have a bad feeling I am going to get deleted :(",
-    metadata={"source": "tweet"},
-    id=10,
-)
+    # Extract text from PDF
+    text_content = extract_text_from_pdf(pdf_path)
 
-documents = [
-    document_1,
-    document_2,
-    document_3,
-    document_4,
-    document_5,
-    document_6,
-    document_7,
-    document_8,
-    document_9,
-    document_10,
-]
-doc_ids = [str(uuid4()) for _ in range(len(documents))]
+    if text_content.strip():
+        # Create a document with the full text
+        doc = Document(
+            page_content=text_content,
+            metadata={"file": filename, "timestamp": current_timestamp},
+        )
 
-vector_store.add_documents(documents=documents, ids=doc_ids)
+        # Split the document into chunks
+        split_docs = text_splitter.split_documents([doc])
 
-results = vector_store.similarity_search_with_score("sky", k=1)
-for res, score in results:
-    print(f"* [SIM={score:3f}] {res.page_content} [{res.metadata}]")
+        # Update metadata for each chunk with chunk index
+        for i, split_doc in enumerate(split_docs):
+            split_doc.metadata = {
+                "file": filename,
+                "timestamp": current_timestamp,
+                "chunk_index": i,
+                "total_chunks": len(split_docs),
+            }
+
+        documents.extend(split_docs)
+        print(f"  → Created {len(split_docs)} chunks from {filename}")
+
+if documents:
+    # Generate unique IDs for each document chunk
+    doc_ids = [str(uuid4()) for _ in range(len(documents))]
+
+    # Add documents to vector store
+    vector_store.add_documents(documents=documents, ids=doc_ids)
+    print(
+        f"\nAdded {len(documents)} document chunks from {len(pdf_files)} PDF files to the vector store."
+    )
+
+    # Show chunk distribution per file
+    file_chunks = {}
+    for doc in documents:
+        filename = doc.metadata["file"]
+        file_chunks[filename] = file_chunks.get(filename, 0) + 1
+
+    print("\nChunk distribution:")
+    for filename, chunk_count in file_chunks.items():
+        print(f"  {filename}: {chunk_count} chunks")
+
+    # Test similarity search
+    if documents:
+        results = vector_store.similarity_search_with_score("content", k=3)
+        print(f"\nSample search results:")
+        for res, score in results:
+            print(
+                f"* [SIM={score:.3f}] File: {res.metadata['file']} (chunk {res.metadata['chunk_index']}/{res.metadata['total_chunks']})"
+            )
+            print(f"  Content: {res.page_content[:100]}...")
+else:
+    print("No PDF files found or no content extracted.")
