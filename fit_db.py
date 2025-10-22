@@ -6,6 +6,7 @@ from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
+from time import perf_counter
 
 
 embeddings = FastEmbedEmbeddings()
@@ -16,6 +17,9 @@ vector_store = Chroma(
 )
 
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+
+# ChromaDB batch size limit: 5461 - set to safe value
+MAX_BATCH_SIZE = 5000
 
 
 def get_pdf_files(directory: str):
@@ -38,6 +42,36 @@ def extract_text_from_pdf(pdf_path: str):
     except Exception as e:
         print(f"Error reading {pdf_path}: {e}")
     return text
+
+
+def add_documents_in_batches(
+    documents: list[Document], doc_ids: list[str], batch_size: int = MAX_BATCH_SIZE
+):
+    """Add documents to vector store in batches to avoid batch size limits."""
+    total_docs = len(documents)
+    total_batches = (total_docs + batch_size - 1) // batch_size
+
+    print(
+        f"Adding {total_docs} documents in {total_batches} batches (max {batch_size} per batch)"
+    )
+
+    for i in range(0, total_docs, batch_size):
+        batch_end = min(i + batch_size, total_docs)
+        batch_docs = documents[i:batch_end]
+        batch_ids = doc_ids[i:batch_end]
+
+        batch_num = (i // batch_size) + 1
+        print(
+            f"  Processing batch {batch_num}/{total_batches}: {len(batch_docs)} documents"
+        )
+
+        try:
+            vector_store.add_documents(documents=batch_docs, ids=batch_ids)
+            print(f"  --> Batch {batch_num} completed successfully")
+        except Exception as e:
+            print(f"  --> Error in batch {batch_num}: {e}")
+            # Continue with next batch instead of failing completely
+            continue
 
 
 # Get all PDF files from the data directory
@@ -75,16 +109,21 @@ for pdf_path in pdf_files:
             }
 
         documents.extend(split_docs)
-        print(f"  → Created {len(split_docs)} chunks from {filename}")
+        print(f"  --> Created {len(split_docs)} chunks from {filename}")
 
 if documents:
+    print(f"\nTotal document chunks to add: {len(documents)}")
     # Generate unique IDs for each document chunk
+    start_time = perf_counter()
     doc_ids = [str(uuid4()) for _ in range(len(documents))]
+    end_time = perf_counter()
 
-    # Add documents to vector store
-    vector_store.add_documents(documents=documents, ids=doc_ids)
+    print(f"  --> Generated {len(doc_ids)} IDs in {end_time - start_time:.4f} seconds")
+
+    # Add documents to vector store in batches
+    add_documents_in_batches(documents, doc_ids)
     print(
-        f"\nAdded {len(documents)} document chunks from {len(pdf_files)} PDF files to the vector store."
+        f"\nCompleted adding {len(documents)} document chunks from {len(pdf_files)} PDF files to the vector store."
     )
 
     # Show chunk distribution per file
