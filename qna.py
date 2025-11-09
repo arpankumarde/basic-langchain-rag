@@ -8,6 +8,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain.retrievers import ContextualCompressionRetriever
+
+# from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain_community.document_compressors import FlashrankRerank
 
 # Load environment variables
 load_dotenv()
@@ -25,6 +29,8 @@ class QnABot:
             embedding_function=self.embeddings,
             persist_directory=persist_directory,
         )
+
+        self.compressor = FlashrankRerank(model="ms-marco-TinyBERT-L-2-v2", top_n=5)
 
         # Initialize Gemini LLM
         self.llm = ChatGoogleGenerativeAI(
@@ -75,27 +81,46 @@ Answer:
             return []
 
     def search_documents(
-        self, query: str, namespace: str = None, k: int = 5
+        self, query: str, namespace: str = None, k: int = 10
     ) -> List[Document]:
         """Search for relevant documents in the vector store."""
         try:
+            # if namespace:
+            #     # Filter by file namespace
+            #     filter_dict = {"file": namespace}
+            #     results = self.vector_store.similarity_search_with_score(
+            #         query, k=k, filter=filter_dict
+            #     )
+            # else:
+            #     # Search across all documents
+            #     results = self.vector_store.similarity_search_with_score(query, k=k)
+            #     print(query, results)
+
+            # # Return documents with relevance scores
+            # documents = []
+            # for doc, score in results:
+            #     # Add relevance score to metadata
+            #     doc.metadata["relevance_score"] = score
+            #     documents.append(doc)
+
             if namespace:
-                # Filter by file namespace
                 filter_dict = {"file": namespace}
-                results = self.vector_store.similarity_search_with_score(
-                    query, k=k, filter=filter_dict
+                base_retriever = self.vector_store.as_retriever(
+                    search_kwargs={"k": k, "filter": filter_dict}
                 )
             else:
-                # Search across all documents
-                results = self.vector_store.similarity_search_with_score(query, k=k)
+                base_retriever = self.vector_store.as_retriever(search_kwargs={"k": k})
 
-            # Return documents with relevance scores
-            documents = []
-            for doc, score in results:
-                # Add relevance score to metadata
-                doc.metadata["relevance_score"] = score
-                documents.append(doc)
+            # Wrap with compression retriever for reranking
+            compression_retriever = ContextualCompressionRetriever(
+                base_compressor=self.compressor, base_retriever=base_retriever
+            )
 
+            # Get reranked documents
+            documents = compression_retriever.invoke(query)
+
+            # print(documents)
+            # print(type(documents[0]))
             return documents
         except Exception as e:
             print(f"Error searching documents: {e}")
@@ -151,6 +176,7 @@ Answer:
             }
 
             messages = self.rag_prompt.format_messages(**prompt_input)
+            print(messages)
             response = self.llm.invoke(messages)
 
             # Add to conversation history
