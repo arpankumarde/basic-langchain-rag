@@ -16,6 +16,7 @@ dependencies = [
     "langchain-ollama>=0.3.10",
     "langchain-openai>=0.3.35",
     "langchain-qdrant>=0.2.1",
+    "langchain-tavily>=0.2.13",
     "langchain-text-splitters>=0.3.11",
     "langchain[google-genai,openai]>=0.3.27",
     "langgraph>=0.6.10",

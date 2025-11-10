@@ -6,7 +6,7 @@ from langchain.retrievers import ContextualCompressionRetriever, MultiQueryRetri
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_tavily import TavilySearch
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -17,10 +17,13 @@ from dotenv import load_dotenv
 import getpass
 import os
 
-# ============= SETUP =============
 load_dotenv()
 if not os.environ.get("GOOGLE_API_KEY"):
     os.environ["GOOGLE_API_KEY"] = getpass.getpass("Enter API key for Google Gemini: ")
+
+# Add Tavily API key prompt if missing
+if not os.environ.get("TAVILY_API_KEY"):
+    os.environ["TAVILY_API_KEY"] = getpass.getpass("Tavily API key:\n")
 
 embeddings = FastEmbedEmbeddings()
 llm = ChatGoogleGenerativeAI(
@@ -102,8 +105,8 @@ def retrieve_financial_docs(query: str) -> str:
 def web_search(query: str) -> str:
     """Search the web for additional financial information when context is insufficient"""
     try:
-        search = DuckDuckGoSearchRun(verbose=True)
-        results = search.invoke(query)
+        # Use TavilySearch tool and return results
+        results = tavily_search_tool.invoke({"query": query})
         return str(results)
     except Exception as e:
         return f"Web search unavailable: {str(e)}"
